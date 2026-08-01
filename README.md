@@ -6,6 +6,7 @@ QR·결제 링크를 기계 판독 가능한 결제 의도로 변환하고, Gemi
 
 - [구현 계획](docs/implementation-plan.md)
 - [의존성 패키지 역할과 관계](docs/dependencies.md)
+- [Solana Devnet 지갑 및 테스트 자산 준비](docs/devnet-setup.md)
 
 ## 로컬 개발 환경
 
