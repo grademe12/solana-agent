@@ -4,7 +4,11 @@ from datetime import UTC, datetime, timedelta
 from google.adk.agents import Agent
 from google.adk.apps import App
 
-from apps.agent_api.adk_tools import inspect_payment_request, preview_payment_policy
+from apps.agent_api.adk_tools import (
+    execute_mock_guarded_checkout,
+    inspect_payment_request,
+    preview_payment_policy,
+)
 from apps.agent_api.agent import (
     AGENT_NAME,
     APP_NAME,
@@ -51,18 +55,23 @@ def test_adk_app_exposes_read_only_payment_agent() -> None:
     assert adk_app.root_agent is root_agent
 
     tool_names = {tool.__name__ for tool in root_agent.tools}
-    assert tool_names == {"inspect_payment_request", "preview_payment_policy"}
+    assert tool_names == {
+        "inspect_payment_request",
+        "preview_payment_policy",
+        "execute_mock_guarded_checkout",
+    }
     assert not any(
         dangerous in tool_name
         for tool_name in tool_names
-        for dangerous in ("execute", "sign", "submit", "transfer")
+        for dangerous in ("sign", "submit", "transfer")
     )
 
 
 def test_agent_instruction_forbids_payment_completion_claims() -> None:
     assert "Never infer a missing amount" in PAYMENT_AGENT_INSTRUCTION
-    assert "Never claim that a payment was authorized" in PAYMENT_AGENT_INSTRUCTION
-    assert "no signing or payment execution tool" in PAYMENT_AGENT_INSTRUCTION
+    assert "Never claim that real funds were authorized" in PAYMENT_AGENT_INSTRUCTION
+    assert "no real signing, RPC, or payment execution tool" in PAYMENT_AGENT_INSTRUCTION
+    assert "mock signature is not valid on Solana" in PAYMENT_AGENT_INSTRUCTION
 
 
 def test_inspection_tool_returns_serializable_authoritative_intent() -> None:
@@ -94,3 +103,19 @@ def test_policy_preview_returns_structured_validation_error() -> None:
     assert result["status"] == "invalid_policy"
     assert result["advisory_only"] is True
     assert result["errors"]
+
+
+def test_adk_mock_checkout_tool_never_claims_real_payment() -> None:
+    result = execute_mock_guarded_checkout(
+        PAYLOAD,
+        make_policy_json(),
+        session_id="adk-mock-test-session",
+        demo_merchant_id="demo-merchant",
+    )
+
+    assert result["status"] == "confirmed"
+    assert result["mode"] == "mock"
+    assert result["real_funds_moved"] is False
+    assert result["receipt"]["mock"] is True
+    assert result["receipt"]["explorer_url"] is None
+    assert result["receipt"]["signature"].startswith("mock:")
