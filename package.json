@@ -1,0 +1,10 @@
+{
+  "name": "agentic-checkout",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @agentic-checkout/web dev",
+    "build:web": "pnpm --filter @agentic-checkout/web build",
+    "lint:web": "pnpm --filter @agentic-checkout/web lint"
+  }
+}
