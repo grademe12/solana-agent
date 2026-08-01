@@ -4,6 +4,8 @@ import zxingcpp  # type: ignore[import-untyped]
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import apps.agent_api.api as api_module
+from apps.agent_api.agent_runtime import AgentRunResult, AgentToolTrace
 from apps.agent_api.api import app
 from apps.agent_api.settings import SOLANA_DEVNET_USDC_MINT
 
@@ -103,3 +105,36 @@ def test_decode_qr_upload_api() -> None:
     assert response.status_code == 200
     assert response.json()["raw_payload"] == PAYLOAD
     assert response.json()["payload_hash"].startswith("sha256:")
+
+
+def test_agent_run_api_returns_tool_trajectory(monkeypatch) -> None:
+    class FakeAgentRuntime:
+        async def run(self, *, user_id: str, session_id: str, prompt: str) -> AgentRunResult:
+            assert user_id == "demo-user"
+            assert session_id == "agent-session"
+            assert prompt == "결제를 실행해줘"
+            return AgentRunResult(
+                final_text="완료",
+                trajectory=(
+                    AgentToolTrace("inspect_payment_request", "requested"),
+                    AgentToolTrace("inspect_payment_request", "completed"),
+                ),
+                checkout_result={"status": "confirmed", "mode": "mock"},
+            )
+
+    monkeypatch.setattr(api_module, "agent_runtime", FakeAgentRuntime())
+    response = TestClient(app).post(
+        "/api/agent/run",
+        json={
+            "user_id": "demo-user",
+            "session_id": "agent-session",
+            "prompt": "결제를 실행해줘",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["final_text"] == "완료"
+    assert response.json()["trajectory"][0] == {
+        "tool_name": "inspect_payment_request",
+        "phase": "requested",
+    }

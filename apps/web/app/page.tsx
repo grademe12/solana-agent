@@ -45,6 +45,12 @@ type CheckoutResult = {
   } | null;
 };
 
+type AgentRunResponse = {
+  final_text: string;
+  trajectory: { tool_name: string; phase: string }[];
+  checkout_result: CheckoutResult | null;
+};
+
 function amountToAtomic(value: string): number {
   if (!/^\d+(\.\d{0,6})?$/.test(value)) {
     throw new Error("USDC 금액은 소수점 6자리 이내로 입력하세요.");
@@ -79,6 +85,8 @@ export default function Home() {
   const [dailyLimit, setDailyLimit] = useState("5.00");
   const [transactionCount, setTransactionCount] = useState("10");
   const [result, setResult] = useState<CheckoutResult | null>(null);
+  const [agentTrajectory, setAgentTrajectory] = useState<AgentRunResponse["trajectory"]>([]);
+  const [agentText, setAgentText] = useState("");
   const [busy, setBusy] = useState<"decode" | "inspect" | "execute" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +102,8 @@ export default function Home() {
     setBusy("inspect");
     setError(null);
     setResult(null);
+    setAgentTrajectory([]);
+    setAgentText("");
     try {
       const response = await fetch(`${API_URL}/api/intents/resolve`, {
         method: "POST",
@@ -134,6 +144,8 @@ export default function Home() {
     setBusy("execute");
     setError(null);
     setResult(null);
+    setAgentTrajectory([]);
+    setAgentText("");
     try {
       const sessionId = crypto.randomUUID();
       const policy = {
@@ -158,12 +170,24 @@ export default function Home() {
         body: JSON.stringify({ session_id: sessionId, policy }),
       });
       const authorization = await readJson<{ authorization_id: string }>(authorizationResponse);
-      const executeResponse = await fetch(`${API_URL}/api/checkout/execute`, {
+      const prompt = [
+        "다음 Solana Pay 요청을 먼저 분석한 뒤, 제공한 authorization을 사용해 결제를 실행해줘.",
+        "결과는 도구 응답에 근거해서만 설명해.",
+        `payment_payload: ${payload}`,
+        `authorization_id: ${authorization.authorization_id}`,
+      ].join("\n");
+      const executeResponse = await fetch(`${API_URL}/api/agent/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload, authorization_id: authorization.authorization_id }),
+        body: JSON.stringify({ user_id: "demo-user", session_id: sessionId, prompt }),
       });
-      setResult(await readJson<CheckoutResult>(executeResponse));
+      const agentRun = await readJson<AgentRunResponse>(executeResponse);
+      setAgentTrajectory(agentRun.trajectory);
+      setAgentText(agentRun.final_text);
+      if (!agentRun.checkout_result) {
+        throw new Error("Gemini가 결제 실행 도구를 호출하지 않았습니다.");
+      }
+      setResult(agentRun.checkout_result);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "결제를 실행하지 못했습니다.");
     } finally {
@@ -266,6 +290,21 @@ export default function Home() {
           </div>
           {error ? <p className="error-message">{error}</p> : result && (
             <>
+              {agentTrajectory.length > 0 && (
+                <div className="agent-evidence">
+                  <div>
+                    <span>Gemini / ADK tool trajectory</span>
+                    <div className="tool-chips">
+                      {agentTrajectory.map((trace, index) => (
+                        <code key={`${trace.tool_name}-${trace.phase}-${index}`}>
+                          {trace.tool_name} · {trace.phase}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                  {agentText && <p>{agentText}</p>}
+                </div>
+              )}
               <div className="timeline">
                 <div className="done"><span>1</span><b>Intent 분석</b><small>{shorten(result.intent_id)}</small></div>
                 <div className="done"><span>2</span><b>정책 검증</b><small>{result.policy_rejection_codes?.length ? "거부" : "통과"}</small></div>

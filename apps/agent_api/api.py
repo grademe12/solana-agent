@@ -12,11 +12,13 @@ from apps.agent_api.adk_tools import (
     authorization_store,
     execute_authorized_checkout,
 )
+from apps.agent_api.agent_runtime import AgentRuntime
 from apps.agent_api.tools.decode_qr import MAX_IMAGE_BYTES, QrDecodeError, decode_payment_qr
 from apps.agent_api.tools.resolve_intent import resolve_payment_intent
 from packages.schemas import SpendingPolicy
 
 app = FastAPI(title="Agentic Checkout API", version="0.1.0")
+agent_runtime = AgentRuntime()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
@@ -48,6 +50,14 @@ class PaymentPayloadRequest(BaseModel):
 
 class ExecuteCheckoutRequest(PaymentPayloadRequest):
     authorization_id: str = Field(min_length=1, max_length=256)
+
+
+class AgentRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    user_id: str = Field(min_length=1, max_length=128)
+    session_id: str = Field(min_length=1, max_length=128)
+    prompt: str = Field(min_length=1, max_length=12_000)
 
 
 @app.get("/healthz")
@@ -118,3 +128,28 @@ async def execute_checkout(request: ExecuteCheckoutRequest) -> dict[str, object]
     """Invoke the same guarded execution capability exposed to the ADK agent."""
 
     return await execute_authorized_checkout(request.payload, request.authorization_id)
+
+
+@app.post("/api/agent/run")
+async def run_agent(request: AgentRunRequest) -> dict[str, object]:
+    """Run Gemini through ADK and return its redacted tool trajectory."""
+
+    try:
+        result = await agent_runtime.run(
+            user_id=request.user_id,
+            session_id=request.session_id,
+            prompt=request.prompt,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Gemini/ADK execution is unavailable; verify Google Cloud credentials.",
+        ) from exc
+    return {
+        "final_text": result.final_text,
+        "trajectory": [
+            {"tool_name": trace.tool_name, "phase": trace.phase}
+            for trace in result.trajectory
+        ],
+        "checkout_result": result.checkout_result,
+    }
