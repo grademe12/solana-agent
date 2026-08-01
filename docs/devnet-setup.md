@@ -54,3 +54,17 @@ git check-ignore -v .secrets/devnet-agent-keypair.json
 
 `.gitignore`의 `.secrets/` 규칙이 표시되어야 한다.
 
+## 제출 없는 실제 RPC simulation
+
+다음 명령은 최신 Devnet blockhash로 USDC 거래를 만들고 로컬 키로 서명한 뒤
+RPC simulation까지만 수행한다. `sendTransaction`은 호출하지 않는다.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\prepare_devnet_transfer.py `
+  --recipient <SOLANA_RECIPIENT> `
+  --reference <SOLANA_PAY_REFERENCE> `
+  --amount 0.10
+```
+
+출력의 마지막 줄은 항상 `Submitted: false`다. SOL 또는 USDC가 부족하면
+`AccountNotFound`나 잔액 부족 오류가 정상적으로 표시되며 온체인 거래는 생기지 않는다.

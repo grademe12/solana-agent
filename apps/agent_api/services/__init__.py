@@ -39,6 +39,16 @@ from apps.agent_api.services.policy import (
     PolicyUsage,
     evaluate_payment_policy,
 )
+from apps.agent_api.services.solana_transfer import (
+    DevnetUsdcTransferService,
+    PreparedSolanaTransfer,
+    SolanaTransferPlan,
+    build_usdc_transfer_plan,
+    compile_and_sign_transfer,
+)
+from apps.agent_api.services.solana_transfer import (
+    transfer_plan_matches_intent as solana_transfer_plan_matches_intent,
+)
 
 __all__ = [
     "AttemptStatus",
@@ -48,6 +58,7 @@ __all__ = [
     "DevnetRpcService",
     "DevnetRpcSnapshot",
     "DevnetFundingUnavailable",
+    "DevnetUsdcTransferService",
     "GuardedMockCheckout",
     "InMemoryPaymentLedger",
     "InsufficientMockBalance",
@@ -63,12 +74,17 @@ __all__ = [
     "PolicyEvaluation",
     "PolicyRejectionCode",
     "PolicyUsage",
+    "PreparedSolanaTransfer",
     "ReservationResult",
+    "SolanaTransferPlan",
     "WrongSolanaCluster",
     "create_or_load_keypair_file",
+    "build_usdc_transfer_plan",
+    "compile_and_sign_transfer",
     "evaluate_payment_policy",
     "make_idempotency_key",
     "load_keypair_file",
     "mock_receipt_matches_intent",
+    "solana_transfer_plan_matches_intent",
     "transfer_plan_matches_intent",
 ]
