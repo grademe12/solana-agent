@@ -1,6 +1,11 @@
 """Deterministic services used by the guarded payment executor."""
 
 from apps.agent_api.services.checkout import CheckoutResult, GuardedMockCheckout
+from apps.agent_api.services.devnet_checkout import (
+    DevnetCheckoutResult,
+    DevnetTransferGateway,
+    GuardedDevnetCheckout,
+)
 from apps.agent_api.services.devnet_rpc import (
     DEVNET_GENESIS_HASH,
     LAMPORTS_PER_SOL,
@@ -63,9 +68,12 @@ __all__ = [
     "DEVNET_GENESIS_HASH",
     "DevnetRpcService",
     "DevnetRpcSnapshot",
+    "DevnetCheckoutResult",
+    "DevnetTransferGateway",
     "DevnetFundingUnavailable",
     "DevnetUsdcTransferService",
     "GuardedMockCheckout",
+    "GuardedDevnetCheckout",
     "InMemoryPaymentLedger",
     "InsufficientMockBalance",
     "InvalidAttemptTransition",

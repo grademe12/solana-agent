@@ -195,6 +195,27 @@ class DevnetUsdcTransferService:
         self._endpoint = str(settings.solana_rpc_url)
         self._rpc_guard = DevnetRpcService(settings)
 
+    async def quote_fee(self, intent: PaymentIntent) -> int:
+        """Estimate the network fee without signing or submitting a transaction."""
+
+        signer = load_keypair_file(self._settings.resolved_keypair_path())
+        await self._rpc_guard.probe(signer.pubkey())
+        plan = build_usdc_transfer_plan(intent, payer=signer.pubkey())
+        async with AsyncClient(self._endpoint, commitment=Confirmed) as client:
+            genesis_hash = str((await client.get_genesis_hash()).value)
+            DevnetRpcService._require_devnet(genesis_hash)
+            latest = (await client.get_latest_blockhash(commitment=Confirmed)).value
+            message = MessageV0.try_compile(
+                plan.payer,
+                list(plan.instructions),
+                [],
+                latest.blockhash,
+            )
+            fee = (await client.get_fee_for_message(message, commitment=Confirmed)).value
+        if fee is None:
+            raise RuntimeError("RPC could not estimate the transfer fee")
+        return fee
+
     async def prepare_and_simulate(self, intent: PaymentIntent) -> PreparedSolanaTransfer:
         signer = load_keypair_file(self._settings.resolved_keypair_path())
         await self._rpc_guard.probe(signer.pubkey())
