@@ -1,12 +1,32 @@
+from io import BytesIO
+
+import zxingcpp  # type: ignore[import-untyped]
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from apps.agent_api.api import app
+from apps.agent_api.settings import SOLANA_DEVNET_USDC_MINT
+
+RECIPIENT = "FvJ8k8HhXp4a3zQyFMZd4FvEqcYdYE7gSZWxrEBRfBsB"
+REFERENCE = "SysvarC1ock11111111111111111111111111111111"
+PAYLOAD = (
+    f"solana:{RECIPIENT}?amount=0.2&spl-token={SOLANA_DEVNET_USDC_MINT}"
+    f"&reference={REFERENCE}"
+)
+
+
+def _qr_png(payload: str) -> bytes:
+    barcode = zxingcpp.create_barcode(payload, zxingcpp.BarcodeFormat.QRCode)
+    qr_image = zxingcpp.write_barcode_to_image(barcode, scale=4)
+    height, width = qr_image.shape
+    image = Image.frombytes("L", (width, height), bytes(qr_image))
+    output = BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def _policy() -> dict[str, object]:
     from datetime import UTC, datetime, timedelta
-
-    from apps.agent_api.settings import SOLANA_DEVNET_USDC_MINT
 
     return {
         "policy_id": "api-policy",
@@ -48,3 +68,38 @@ def test_create_and_revoke_payment_authorization() -> None:
 
     revoked = client.delete(f"/api/authorizations/{body['authorization_id']}")
     assert revoked.status_code == 204
+
+
+def test_resolve_and_execute_authorized_checkout_api() -> None:
+    client = TestClient(app)
+    resolved = client.post("/api/intents/resolve", json={"payload": PAYLOAD})
+
+    assert resolved.status_code == 200
+    assert resolved.json()["confidence"] == "authoritative"
+    assert resolved.json()["amount_display"] == "0.2"
+
+    created = client.post(
+        "/api/authorizations",
+        json={"session_id": "api-execution-session", "policy": _policy()},
+    )
+    authorization_id = created.json()["authorization_id"]
+    executed = client.post(
+        "/api/checkout/execute",
+        json={"payload": PAYLOAD, "authorization_id": authorization_id},
+    )
+
+    assert executed.status_code == 200
+    assert executed.json()["status"] == "confirmed"
+    assert executed.json()["mode"] == "mock"
+    assert executed.json()["real_funds_moved"] is False
+
+
+def test_decode_qr_upload_api() -> None:
+    response = TestClient(app).post(
+        "/api/qr/decode",
+        files={"file": ("payment.png", _qr_png(PAYLOAD), "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["raw_payload"] == PAYLOAD
+    assert response.json()["payload_hash"].startswith("sha256:")
