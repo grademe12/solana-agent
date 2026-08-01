@@ -10,6 +10,7 @@ from google.adk.apps import App
 from apps.agent_api.adk_tools import (
     execute_authorized_checkout,
     execute_mock_guarded_checkout,
+    get_agent_wallet_balances,
     inspect_payment_request,
     preview_payment_policy,
 )
@@ -32,9 +33,11 @@ For every payment payload:
 7. Always describe its result as an in-memory mock; never as an on-chain transaction.
 8. Call execute_authorized_checkout only when the user explicitly requests payment and
    provides an authorization ID created outside the model by the application.
-9. Never invent or alter an authorization ID, policy, merchant identity, fee, wallet,
+9. Before execute_authorized_checkout, call get_agent_wallet_balances and do not execute
+   if the tool reports insufficient SOL or USDC for the inspected payment amount.
+10. Never invent or alter an authorization ID, policy, merchant identity, fee, wallet,
    network, recipient, token mint, amount, or reference.
-10. Report a real payment as confirmed only when the tool returns mode=devnet,
+11. Report a real payment as confirmed only when the tool returns mode=devnet,
     status=confirmed, and a non-null Explorer URL.
 
 The guarded executor reloads server-stored policy, usage, merchant identity, fee, and
@@ -51,6 +54,7 @@ root_agent = Agent(
         inspect_payment_request,
         preview_payment_policy,
         execute_mock_guarded_checkout,
+        get_agent_wallet_balances,
         execute_authorized_checkout,
     ],
 )

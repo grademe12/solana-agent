@@ -9,6 +9,7 @@ from apps.agent_api.adk_tools import (
     authorization_store,
     execute_authorized_checkout,
     execute_mock_guarded_checkout,
+    get_agent_wallet_balances,
     inspect_payment_request,
     preview_payment_policy,
 )
@@ -64,6 +65,7 @@ def test_adk_app_exposes_guarded_payment_agent() -> None:
         "preview_payment_policy",
         "execute_mock_guarded_checkout",
         "execute_authorized_checkout",
+        "get_agent_wallet_balances",
     }
 
 
@@ -144,3 +146,14 @@ async def test_authorized_tool_rejects_unknown_authorization() -> None:
     result = await execute_authorized_checkout(PAYLOAD, "unknown")
 
     assert result == {"status": "authorization_not_found", "submitted": False}
+
+
+@pytest.mark.asyncio
+async def test_wallet_balance_tool_is_read_only_and_mock_by_default() -> None:
+    result = await get_agent_wallet_balances()
+
+    assert result["status"] == "ok"
+    assert result["mode"] == "mock"
+    assert result["read_only"] is True
+    assert result["usdc_atomic"]
+    assert result["sol_lamports"] > 0

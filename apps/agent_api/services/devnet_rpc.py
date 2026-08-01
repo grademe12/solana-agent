@@ -9,6 +9,7 @@ from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
 from solana.rpc.core import RPCException
 from solders.pubkey import Pubkey
+from spl.token.instructions import get_associated_token_address
 
 from apps.agent_api.settings import SolanaSettings
 
@@ -30,6 +31,7 @@ class DevnetRpcSnapshot:
     genesis_hash: str
     slot: int
     wallet_balance_lamports: int
+    wallet_usdc_atomic: int
     usdc_mint: str
     usdc_decimals: int
 
@@ -58,6 +60,19 @@ class DevnetRpcService:
             token_supply = (
                 await client.get_token_supply(self._usdc_mint, commitment=Confirmed)
             ).value
+            wallet_token_account = get_associated_token_address(wallet, self._usdc_mint)
+            account = (
+                await client.get_account_info(wallet_token_account, commitment=Confirmed)
+            ).value
+            wallet_usdc_atomic = 0
+            if account is not None:
+                token_balance = (
+                    await client.get_token_account_balance(
+                        wallet_token_account,
+                        commitment=Confirmed,
+                    )
+                ).value
+                wallet_usdc_atomic = int(token_balance.amount)
         if token_supply.decimals != 6:
             raise WrongSolanaCluster("configured USDC mint does not have 6 decimals")
         return DevnetRpcSnapshot(
@@ -65,6 +80,7 @@ class DevnetRpcService:
             genesis_hash=genesis_hash,
             slot=slot,
             wallet_balance_lamports=balance,
+            wallet_usdc_atomic=wallet_usdc_atomic,
             usdc_mint=str(self._usdc_mint),
             usdc_decimals=token_supply.decimals,
         )

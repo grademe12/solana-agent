@@ -52,6 +52,7 @@ async def run(minimum_lamports: int) -> None:
     print(f"Genesis hash: {snapshot.genesis_hash}")
     print(f"Confirmed slot: {snapshot.slot}")
     print(f"SOL balance lamports: {snapshot.wallet_balance_lamports}")
+    print(f"USDC balance atomic: {snapshot.wallet_usdc_atomic}")
     print(f"USDC mint: {snapshot.usdc_mint}")
     print(f"USDC decimals: {snapshot.usdc_decimals}")
 

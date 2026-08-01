@@ -16,6 +16,8 @@ from apps.agent_api.services import (
     MockWallet,
 )
 from apps.agent_api.services.authorizations import InMemoryAuthorizationStore
+from apps.agent_api.services.devnet_rpc import DevnetRpcService
+from apps.agent_api.services.keypairs import load_keypair_file
 from apps.agent_api.services.policy import PolicyUsage, evaluate_payment_policy
 from apps.agent_api.settings import SolanaSettings
 from apps.agent_api.tools.resolve_intent import (
@@ -54,6 +56,43 @@ def _get_devnet_checkout(settings: SolanaSettings) -> GuardedDevnetCheckout:
             gateway=DevnetUsdcTransferService(settings),
         )
     return _devnet_checkout
+
+
+async def get_agent_wallet_balances() -> dict[str, Any]:
+    """Read the configured agent wallet's public SOL and USDC balances.
+
+    This tool never accepts a wallet path, RPC endpoint, network, mint, or private
+    key from the model and never signs or submits a transaction.
+    """
+
+    settings = SolanaSettings()
+    if settings.payment_execution_mode == "mock":
+        mock_snapshot = _mock_wallet.snapshot()
+        return {
+            "status": "ok",
+            "mode": "mock",
+            "read_only": True,
+            "wallet": mock_snapshot.public_key,
+            "sol_lamports": mock_snapshot.sol_lamports,
+            "usdc_atomic": str(
+                mock_snapshot.token_balances.get(SOLANA_DEVNET_USDC_MINT, 0)
+            ),
+            "usdc_decimals": 6,
+            "slot": None,
+        }
+
+    signer = load_keypair_file(settings.resolved_keypair_path())
+    devnet_snapshot = await DevnetRpcService(settings).probe(signer.pubkey())
+    return {
+        "status": "ok",
+        "mode": "devnet",
+        "read_only": True,
+        "wallet": str(signer.pubkey()),
+        "sol_lamports": devnet_snapshot.wallet_balance_lamports,
+        "usdc_atomic": str(devnet_snapshot.wallet_usdc_atomic),
+        "usdc_decimals": devnet_snapshot.usdc_decimals,
+        "slot": devnet_snapshot.slot,
+    }
 
 
 def inspect_payment_request(payload: str) -> dict[str, Any]:
