@@ -13,15 +13,17 @@ from apps.agent_api.adk_tools import (
     execute_authorized_checkout,
 )
 from apps.agent_api.agent_runtime import AgentRuntime
+from apps.agent_api.settings import SolanaSettings
 from apps.agent_api.tools.decode_qr import MAX_IMAGE_BYTES, QrDecodeError, decode_payment_qr
 from apps.agent_api.tools.resolve_intent import resolve_payment_intent
 from packages.schemas import SpendingPolicy
 
+runtime_settings = SolanaSettings()
 app = FastAPI(title="Agentic Checkout API", version="0.1.0")
 agent_runtime = AgentRuntime()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
+    allow_origins=runtime_settings.parsed_cors_allowed_origins(),
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type"],

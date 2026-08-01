@@ -30,6 +30,11 @@ class SolanaSettings(BaseSettings):
         min_length=32,
         max_length=44,
     )
+    cors_allowed_origins: str = "http://127.0.0.1:3000,http://localhost:3000"
+
+    def parsed_cors_allowed_origins(self) -> list[str]:
+        origins = [origin.strip() for origin in self.cors_allowed_origins.split(",")]
+        return [origin for origin in origins if origin]
 
     @field_validator("solana_usdc_mint")
     @classmethod
