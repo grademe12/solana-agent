@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,6 +16,9 @@ class PaymentAuthorization:
     authorization_id: str
     session_id: str
     policy: SpendingPolicy
+    payment_payload: str
+    intent_id: str
+    source_payload_hash: str
     created_at: datetime
 
 
@@ -30,16 +34,31 @@ class InMemoryAuthorizationStore:
         *,
         session_id: str,
         policy: SpendingPolicy,
+        payment_payload: str,
+        intent_id: str,
+        source_payload_hash: str,
         now: datetime,
     ) -> PaymentAuthorization:
         if not session_id:
             raise ValueError("session_id is required")
+        if not payment_payload:
+            raise ValueError("payment_payload is required")
+        expected_payload_hash = "sha256:" + hashlib.sha256(
+            payment_payload.encode("utf-8")
+        ).hexdigest()
+        if source_payload_hash != expected_payload_hash:
+            raise ValueError("source_payload_hash does not match payment_payload")
+        if not intent_id.startswith("sha256:"):
+            raise ValueError("intent_id must be a sha256 identifier")
         if now.utcoffset() is None:
             raise ValueError("now must include a timezone")
         authorization = PaymentAuthorization(
             authorization_id=secrets.token_urlsafe(24),
             session_id=session_id,
             policy=policy,
+            payment_payload=payment_payload,
+            intent_id=intent_id,
+            source_payload_hash=source_payload_hash,
             created_at=now,
         )
         with self._lock:

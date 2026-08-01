@@ -1,3 +1,4 @@
+import inspect
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -10,6 +11,7 @@ from apps.agent_api.adk_tools import (
     execute_authorized_checkout,
     execute_mock_guarded_checkout,
     get_agent_wallet_balances,
+    inspect_authorized_payment,
     inspect_payment_request,
     preview_payment_policy,
 )
@@ -62,8 +64,8 @@ def test_adk_app_exposes_guarded_payment_agent() -> None:
     tool_names = {tool.__name__ for tool in root_agent.tools}
     assert tool_names == {
         "inspect_payment_request",
+        "inspect_authorized_payment",
         "preview_payment_policy",
-        "execute_mock_guarded_checkout",
         "execute_authorized_checkout",
         "get_agent_wallet_balances",
     }
@@ -72,9 +74,10 @@ def test_adk_app_exposes_guarded_payment_agent() -> None:
 def test_agent_instruction_restricts_payment_completion_claims() -> None:
     assert "Never infer a missing amount" in PAYMENT_AGENT_INSTRUCTION
     assert "provides an authorization ID" in PAYMENT_AGENT_INSTRUCTION
+    assert "Never reconstruct, copy, or pass a payment payload" in PAYMENT_AGENT_INSTRUCTION
     assert "Never invent or alter an authorization ID" in PAYMENT_AGENT_INSTRUCTION
     assert "status=confirmed" in PAYMENT_AGENT_INSTRUCTION
-    assert "mock signature is not valid on Solana" in PAYMENT_AGENT_INSTRUCTION
+    assert "including a server-configured mock checkout" in PAYMENT_AGENT_INSTRUCTION
 
 
 def test_inspection_tool_returns_serializable_authoritative_intent() -> None:
@@ -130,11 +133,17 @@ async def test_authorized_tool_uses_server_stored_policy_in_mock_mode() -> None:
     authorization = authorization_store().create(
         session_id="authorized-tool-session",
         policy=policy,
+        payment_payload=PAYLOAD,
+        intent_id=inspect_payment_request(PAYLOAD)["intent"]["intent_id"],
+        source_payload_hash=inspect_payment_request(PAYLOAD)["intent"]["source_payload_hash"],
         now=datetime.now(UTC),
     )
 
-    result = await execute_authorized_checkout(PAYLOAD, authorization.authorization_id)
+    inspected = inspect_authorized_payment(authorization.authorization_id)
+    result = await execute_authorized_checkout(authorization.authorization_id)
 
+    assert inspected["binding_valid"] is True
+    assert inspected["intent"]["intent_id"] == authorization.intent_id
     assert result["status"] == "confirmed"
     assert result["mode"] == "mock"
     assert result["real_funds_moved"] is False
@@ -143,9 +152,15 @@ async def test_authorized_tool_uses_server_stored_policy_in_mock_mode() -> None:
 
 @pytest.mark.asyncio
 async def test_authorized_tool_rejects_unknown_authorization() -> None:
-    result = await execute_authorized_checkout(PAYLOAD, "unknown")
+    result = await execute_authorized_checkout("unknown")
 
     assert result == {"status": "authorization_not_found", "submitted": False}
+
+
+def test_authorized_execution_tool_cannot_accept_model_supplied_payload() -> None:
+    assert list(inspect.signature(execute_authorized_checkout).parameters) == [
+        "authorization_id"
+    ]
 
 
 @pytest.mark.asyncio

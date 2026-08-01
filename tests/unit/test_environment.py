@@ -59,7 +59,11 @@ def test_create_and_revoke_payment_authorization() -> None:
     client = TestClient(app)
     response = client.post(
         "/api/authorizations",
-        json={"session_id": "api-session", "policy": _policy()},
+        json={
+            "session_id": "api-session",
+            "payment_payload": PAYLOAD,
+            "policy": _policy(),
+        },
     )
 
     assert response.status_code == 201
@@ -67,6 +71,8 @@ def test_create_and_revoke_payment_authorization() -> None:
     assert body["session_id"] == "api-session"
     assert body["policy_id"] == "api-policy"
     assert body["authorization_id"]
+    assert body["intent_id"].startswith("sha256:")
+    assert body["source_payload_hash"].startswith("sha256:")
 
     revoked = client.delete(f"/api/authorizations/{body['authorization_id']}")
     assert revoked.status_code == 204
@@ -82,18 +88,44 @@ def test_resolve_and_execute_authorized_checkout_api() -> None:
 
     created = client.post(
         "/api/authorizations",
-        json={"session_id": "api-execution-session", "policy": _policy()},
+        json={
+            "session_id": "api-execution-session",
+            "payment_payload": PAYLOAD,
+            "policy": _policy(),
+        },
     )
     authorization_id = created.json()["authorization_id"]
     executed = client.post(
         "/api/checkout/execute",
-        json={"payload": PAYLOAD, "authorization_id": authorization_id},
+        json={"authorization_id": authorization_id},
     )
 
     assert executed.status_code == 200
     assert executed.json()["status"] == "confirmed"
     assert executed.json()["mode"] == "mock"
     assert executed.json()["real_funds_moved"] is False
+
+
+def test_checkout_api_rejects_model_supplied_payment_payload() -> None:
+    client = TestClient(app)
+    created = client.post(
+        "/api/authorizations",
+        json={
+            "session_id": "api-bound-payload-session",
+            "payment_payload": PAYLOAD,
+            "policy": _policy(),
+        },
+    )
+
+    response = client.post(
+        "/api/checkout/execute",
+        json={
+            "authorization_id": created.json()["authorization_id"],
+            "payload": PAYLOAD.replace("amount=0.2", "amount=0.1"),
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_decode_qr_upload_api() -> None:
@@ -116,8 +148,8 @@ def test_agent_run_api_returns_tool_trajectory(monkeypatch) -> None:
             return AgentRunResult(
                 final_text="완료",
                 trajectory=(
-                    AgentToolTrace("inspect_payment_request", "requested"),
-                    AgentToolTrace("inspect_payment_request", "completed"),
+                    AgentToolTrace("inspect_authorized_payment", "requested"),
+                    AgentToolTrace("inspect_authorized_payment", "completed"),
                 ),
                 checkout_result={"status": "confirmed", "mode": "mock"},
             )
@@ -135,6 +167,6 @@ def test_agent_run_api_returns_tool_trajectory(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["final_text"] == "완료"
     assert response.json()["trajectory"][0] == {
-        "tool_name": "inspect_payment_request",
+        "tool_name": "inspect_authorized_payment",
         "phase": "requested",
     }

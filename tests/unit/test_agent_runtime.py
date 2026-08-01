@@ -12,7 +12,7 @@ def test_extracts_redacted_tool_trajectory_without_arguments() -> None:
             parts=[
                 types.Part.from_function_call(
                     name="execute_authorized_checkout",
-                    args={"payload": "secret-payload", "authorization_id": "secret-id"},
+                    args={"authorization_id": "secret-id"},
                 )
             ],
         ),

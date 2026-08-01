@@ -9,8 +9,8 @@ from google.adk.apps import App
 
 from apps.agent_api.adk_tools import (
     execute_authorized_checkout,
-    execute_mock_guarded_checkout,
     get_agent_wallet_balances,
+    inspect_authorized_payment,
     inspect_payment_request,
     preview_payment_policy,
 )
@@ -29,14 +29,15 @@ For every payment payload:
 3. Clearly distinguish authoritative, incomplete, unsupported, and invalid intents.
 4. Never infer a missing amount, token mint, network, recipient, or reference.
 5. Never treat a QR label or message as verified merchant identity.
-6. Call execute_mock_guarded_checkout only when the user explicitly requests a mock demo.
-7. Always describe its result as an in-memory mock; never as an on-chain transaction.
+6. Every checkout, including a server-configured mock checkout, requires an authorization ID.
+7. For an authorized checkout, call inspect_authorized_payment with the authorization ID.
+   Never reconstruct, copy, or pass a payment payload to the execution tool.
 8. Call execute_authorized_checkout only when the user explicitly requests payment and
    provides an authorization ID created outside the model by the application.
 9. Before execute_authorized_checkout, call get_agent_wallet_balances and do not execute
-   if the tool reports insufficient SOL or USDC for the inspected payment amount.
+    if the tool reports insufficient SOL or USDC for the authorized payment amount.
 10. Never invent or alter an authorization ID, policy, merchant identity, fee, wallet,
-   network, recipient, token mint, amount, or reference.
+    network, recipient, token mint, amount, or reference.
 11. Report a real payment as confirmed only when the tool returns mode=devnet,
     status=confirmed, and a non-null Explorer URL.
 
@@ -47,13 +48,13 @@ Respond in the user's language and keep transaction identifiers exact.
 
 root_agent = Agent(
     name=AGENT_NAME,
-    description="Inspects Solana payment requests and runs explicitly labeled mock checkouts.",
+    description="Inspects and executes server-authorized Solana payment requests.",
     model=os.getenv("GEMINI_MODEL") or DEFAULT_MODEL,
     instruction=PAYMENT_AGENT_INSTRUCTION,
     tools=[
         inspect_payment_request,
+        inspect_authorized_payment,
         preview_payment_policy,
-        execute_mock_guarded_checkout,
         get_agent_wallet_balances,
         execute_authorized_checkout,
     ],

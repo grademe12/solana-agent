@@ -34,6 +34,7 @@ class CreateAuthorizationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     session_id: str = Field(min_length=1, max_length=128)
+    payment_payload: str = Field(min_length=1, max_length=4096)
     policy: dict[str, object]
 
 
@@ -41,6 +42,8 @@ class AuthorizationResponse(BaseModel):
     authorization_id: str
     session_id: str
     policy_id: str
+    intent_id: str
+    source_payload_hash: str
     created_at: datetime
 
 
@@ -50,7 +53,9 @@ class PaymentPayloadRequest(BaseModel):
     payload: str = Field(min_length=1, max_length=4096)
 
 
-class ExecuteCheckoutRequest(PaymentPayloadRequest):
+class ExecuteCheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     authorization_id: str = Field(min_length=1, max_length=256)
 
 
@@ -105,15 +110,29 @@ async def create_authorization(request: CreateAuthorizationRequest) -> Authoriza
             status_code=422,
             detail=exc.errors(include_url=False),
         ) from exc
+    intent = resolve_payment_intent(request.payment_payload)
+    if not intent.is_executable:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "payment_not_authoritative",
+                "message": intent.rejection_reason or "payment request is not executable",
+            },
+        )
     authorization = authorization_store().create(
         session_id=request.session_id,
         policy=policy,
+        payment_payload=request.payment_payload,
+        intent_id=intent.intent_id,
+        source_payload_hash=intent.source_payload_hash,
         now=datetime.now(UTC),
     )
     return AuthorizationResponse(
         authorization_id=authorization.authorization_id,
         session_id=authorization.session_id,
         policy_id=authorization.policy.policy_id,
+        intent_id=authorization.intent_id,
+        source_payload_hash=authorization.source_payload_hash,
         created_at=authorization.created_at,
     )
 
@@ -129,7 +148,7 @@ async def revoke_authorization(authorization_id: str) -> None:
 async def execute_checkout(request: ExecuteCheckoutRequest) -> dict[str, object]:
     """Invoke the same guarded execution capability exposed to the ADK agent."""
 
-    return await execute_authorized_checkout(request.payload, request.authorization_id)
+    return await execute_authorized_checkout(request.authorization_id)
 
 
 @app.post("/api/agent/run")

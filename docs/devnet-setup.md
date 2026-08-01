@@ -78,9 +78,12 @@ RPC simulation까지만 수행한다. `sendTransaction`은 호출하지 않는�
 PAYMENT_EXECUTION_MODE=mock
 ```
 
-사용자는 먼저 `POST /api/authorizations`에 세션 ID와 `SpendingPolicy`를 등록해야 한다.
-API가 반환한 `authorization_id`만 Gemini의 `execute_authorized_checkout` 도구에 전달한다.
-이 도구는 모델 입력에서 정책 한도, 판매자 ID, 지갑 경로, RPC 주소를 받지 않는다.
+사용자는 먼저 `POST /api/authorizations`에 세션 ID, 원본 `payment_payload`,
+`SpendingPolicy`를 등록해야 한다. 서버는 원문에서 intent와 SHA-256 해시를 생성해
+authorization에 함께 고정한다. API가 반환한 `authorization_id`만 Gemini의
+`inspect_authorized_payment`와 `execute_authorized_checkout` 도구에 전달한다.
+실행 도구는 모델 입력에서 결제 원문, 정책 한도, 판매자 ID, 지갑 경로, RPC 주소를
+받지 않으며 서버에 고정된 원문만 다시 파싱한다.
 
 실제 Devnet 데모 직전에만 아래 값을 `.env`에 설정하고 프로세스를 재시작한다.
 

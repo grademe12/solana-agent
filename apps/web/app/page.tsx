@@ -167,13 +167,12 @@ export default function Home() {
       const authorizationResponse = await fetch(`${API_URL}/api/authorizations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: sessionId, policy }),
+        body: JSON.stringify({ session_id: sessionId, payment_payload: payload, policy }),
       });
       const authorization = await readJson<{ authorization_id: string }>(authorizationResponse);
       const prompt = [
-        "다음 Solana Pay 요청을 먼저 분석한 뒤, 제공한 authorization을 사용해 결제를 실행해줘.",
+        "제공한 authorization에 바인딩된 결제 요청을 먼저 분석한 뒤 결제를 실행해줘.",
         "결과는 도구 응답에 근거해서만 설명해.",
-        `payment_payload: ${payload}`,
         `authorization_id: ${authorization.authorization_id}`,
       ].join("\n");
       const executeResponse = await fetch(`${API_URL}/api/agent/run`, {

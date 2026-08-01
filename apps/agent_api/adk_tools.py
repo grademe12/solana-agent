@@ -111,6 +111,34 @@ def inspect_payment_request(payload: str) -> dict[str, Any]:
     }
 
 
+def inspect_authorized_payment(authorization_id: str) -> dict[str, Any]:
+    """Inspect the immutable payment request bound to a server authorization.
+
+    The model receives normalized public payment fields, but the raw payload stays in
+    server memory and cannot be reconstructed or replaced at execution time.
+    """
+
+    authorization = _authorization_store.get(authorization_id)
+    if authorization is None:
+        return {
+            "status": "authorization_not_found",
+            "read_only": True,
+        }
+
+    intent = resolve_payment_intent(authorization.payment_payload)
+    binding_valid = (
+        intent.intent_id == authorization.intent_id
+        and intent.source_payload_hash == authorization.source_payload_hash
+    )
+    return {
+        "status": "ok" if binding_valid else "authorization_binding_mismatch",
+        "read_only": True,
+        "authorization_id": authorization.authorization_id,
+        "binding_valid": binding_valid,
+        "intent": intent.model_dump(mode="json") if binding_valid else None,
+    }
+
+
 def preview_payment_policy(
     payload: str,
     policy_json: str,
@@ -234,7 +262,6 @@ def execute_mock_guarded_checkout(
 
 
 async def execute_authorized_checkout(
-    payload: str,
     authorization_id: str,
 ) -> dict[str, Any]:
     """Execute using a server-stored user policy identified by an authorization ID.
@@ -249,7 +276,17 @@ async def execute_authorized_checkout(
         return {"status": "authorization_not_found", "submitted": False}
 
     settings = SolanaSettings()
+    payload = authorization.payment_payload
     intent = resolve_payment_intent(payload)
+    if (
+        intent.intent_id != authorization.intent_id
+        or intent.source_payload_hash != authorization.source_payload_hash
+    ):
+        return {
+            "status": "authorization_binding_mismatch",
+            "submitted": False,
+            "intent_id": authorization.intent_id,
+        }
     if intent.recipient != settings.demo_merchant_recipient:
         return {
             "status": "unverified_merchant",
