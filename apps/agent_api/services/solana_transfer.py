@@ -7,11 +7,13 @@ from typing import cast
 
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
+from solana.rpc.models import TxOpts
 from solders.hash import Hash
 from solders.instruction import AccountMeta, Instruction
 from solders.keypair import Keypair
 from solders.message import MessageV0
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.transaction import VersionedTransaction
 from spl.token.constants import TOKEN_PROGRAM_ID
 from spl.token.instructions import (
@@ -163,6 +165,28 @@ def compile_and_sign_transfer(
     return VersionedTransaction(message, [signer])
 
 
+def prepared_transfer_matches_intent(
+    prepared: PreparedSolanaTransfer,
+    intent: PaymentIntent,
+) -> bool:
+    """Verify both the plan and the exact signed message before submission."""
+
+    if not transfer_plan_matches_intent(prepared.plan, intent):
+        return False
+    if not isinstance(prepared.transaction.message, MessageV0):
+        return False
+    expected_message = MessageV0.try_compile(
+        prepared.plan.payer,
+        list(prepared.plan.instructions),
+        [],
+        prepared.recent_blockhash,
+    )
+    return bool(
+        prepared.transaction.message == expected_message
+        and prepared.transaction.verify_with_results() == [True]
+    )
+
+
 class DevnetUsdcTransferService:
     """Prepare a real signed transaction and simulate it, without submitting it."""
 
@@ -209,3 +233,66 @@ class DevnetUsdcTransferService:
             simulation_logs=tuple(simulation_value.logs or ()),
             units_consumed=simulation_value.units_consumed,
         )
+
+    async def submit_prepared(
+        self,
+        prepared: PreparedSolanaTransfer,
+        intent: PaymentIntent,
+    ) -> Signature:
+        """Submit only a successfully simulated, untampered, still-valid transaction."""
+
+        if prepared.submitted:
+            raise ValueError("prepared transaction was already submitted")
+        if not prepared.simulation_succeeded:
+            raise ValueError("prepared transaction did not pass simulation")
+        if not prepared_transfer_matches_intent(prepared, intent):
+            raise ValueError("prepared transaction does not match payment intent")
+        signer = load_keypair_file(self._settings.resolved_keypair_path())
+        if signer.pubkey() != prepared.plan.payer:
+            raise ValueError("configured signer does not control the prepared payer")
+
+        async with AsyncClient(self._endpoint, commitment=Confirmed) as client:
+            genesis_hash = str((await client.get_genesis_hash()).value)
+            DevnetRpcService._require_devnet(genesis_hash)
+            block_height = (await client.get_block_height(commitment=Confirmed)).value
+            if block_height > prepared.last_valid_block_height:
+                raise RuntimeError("prepared transaction blockhash expired")
+            submitted = await client.send_transaction(
+                prepared.transaction,
+                opts=TxOpts(
+                    skip_confirmation=True,
+                    skip_preflight=False,
+                    preflight_commitment=Confirmed,
+                    max_retries=3,
+                ),
+            )
+
+        signature = submitted.value
+        signed_signature = prepared.transaction.signatures[0]
+        if signature != signed_signature:
+            raise RuntimeError("RPC returned a different transaction signature")
+        return signature
+
+    async def confirm_and_fetch(self, signature: Signature, *, last_valid_block_height: int) -> str:
+        """Wait for confirmation and return the base64 wire transaction RPC response."""
+
+        async with AsyncClient(self._endpoint, commitment=Confirmed) as client:
+            genesis_hash = str((await client.get_genesis_hash()).value)
+            DevnetRpcService._require_devnet(genesis_hash)
+            confirmation = await client.confirm_transaction(
+                signature,
+                commitment=Confirmed,
+                last_valid_block_height=last_valid_block_height,
+            )
+            status = confirmation.value[0]
+            if status is None or status.err is not None:
+                raise RuntimeError("transaction did not confirm successfully")
+            response = await client.get_transaction(
+                signature,
+                encoding="base64",
+                commitment=Confirmed,
+                max_supported_transaction_version=0,
+            )
+        if response.value is None:
+            raise RuntimeError("confirmed transaction was not returned by RPC")
+        return response.to_json()

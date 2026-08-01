@@ -39,12 +39,18 @@ from apps.agent_api.services.policy import (
     PolicyUsage,
     evaluate_payment_policy,
 )
+from apps.agent_api.services.receipts import (
+    ReceiptVerificationError,
+    SolanaPaymentReceipt,
+    verify_confirmed_transaction,
+)
 from apps.agent_api.services.solana_transfer import (
     DevnetUsdcTransferService,
     PreparedSolanaTransfer,
     SolanaTransferPlan,
     build_usdc_transfer_plan,
     compile_and_sign_transfer,
+    prepared_transfer_matches_intent,
 )
 from apps.agent_api.services.solana_transfer import (
     transfer_plan_matches_intent as solana_transfer_plan_matches_intent,
@@ -76,7 +82,9 @@ __all__ = [
     "PolicyUsage",
     "PreparedSolanaTransfer",
     "ReservationResult",
+    "ReceiptVerificationError",
     "SolanaTransferPlan",
+    "SolanaPaymentReceipt",
     "WrongSolanaCluster",
     "create_or_load_keypair_file",
     "build_usdc_transfer_plan",
@@ -85,6 +93,8 @@ __all__ = [
     "make_idempotency_key",
     "load_keypair_file",
     "mock_receipt_matches_intent",
+    "prepared_transfer_matches_intent",
     "solana_transfer_plan_matches_intent",
     "transfer_plan_matches_intent",
+    "verify_confirmed_transaction",
 ]

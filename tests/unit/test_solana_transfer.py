@@ -7,8 +7,10 @@ from solders.pubkey import Pubkey
 from spl.token.instructions import decode_transfer_checked, get_associated_token_address
 
 from apps.agent_api.services.solana_transfer import (
+    PreparedSolanaTransfer,
     build_usdc_transfer_plan,
     compile_and_sign_transfer,
+    prepared_transfer_matches_intent,
     transfer_plan_matches_intent,
 )
 from apps.agent_api.settings import SOLANA_DEVNET_USDC_MINT
@@ -96,3 +98,32 @@ def test_wrong_signer_is_rejected() -> None:
             recent_blockhash=Hash.new_unique(),
         )
 
+
+def test_prepared_transaction_must_match_signed_plan() -> None:
+    signer = Keypair()
+    intent = make_intent()
+    plan = build_usdc_transfer_plan(intent, payer=signer.pubkey())
+    blockhash = Hash.new_unique()
+    transaction = compile_and_sign_transfer(
+        plan,
+        intent,
+        signer=signer,
+        recent_blockhash=blockhash,
+    )
+    prepared = PreparedSolanaTransfer(
+        plan=plan,
+        transaction=transaction,
+        recent_blockhash=blockhash,
+        last_valid_block_height=100,
+        estimated_fee_lamports=5_000,
+        simulation_succeeded=True,
+        simulation_error=None,
+        simulation_logs=(),
+        units_consumed=1,
+    )
+
+    assert prepared_transfer_matches_intent(prepared, intent)
+    assert not prepared_transfer_matches_intent(
+        replace(prepared, recent_blockhash=Hash.new_unique()),
+        intent,
+    )
