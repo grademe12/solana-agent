@@ -1,4 +1,4 @@
-"""Read-only Google ADK tools for inspecting payment requests and policies."""
+"""Google ADK tools with a guarded boundary around payment execution."""
 
 from __future__ import annotations
 
@@ -8,12 +8,16 @@ from typing import Any
 from pydantic import ValidationError
 
 from apps.agent_api.services import (
+    DevnetUsdcTransferService,
+    GuardedDevnetCheckout,
     GuardedMockCheckout,
     InMemoryPaymentLedger,
     MockSolanaGateway,
     MockWallet,
 )
+from apps.agent_api.services.authorizations import InMemoryAuthorizationStore
 from apps.agent_api.services.policy import PolicyUsage, evaluate_payment_policy
+from apps.agent_api.settings import SolanaSettings
 from apps.agent_api.tools.resolve_intent import (
     SOLANA_DEVNET_USDC_MINT,
     resolve_payment_intent,
@@ -32,6 +36,24 @@ _mock_checkout = GuardedMockCheckout(
     wallet=_mock_wallet,
     gateway=_mock_gateway,
 )
+_authorization_store = InMemoryAuthorizationStore()
+_devnet_checkout: GuardedDevnetCheckout | None = None
+
+
+def authorization_store() -> InMemoryAuthorizationStore:
+    """Return the process-local authorization store used by the API and ADK tool."""
+
+    return _authorization_store
+
+
+def _get_devnet_checkout(settings: SolanaSettings) -> GuardedDevnetCheckout:
+    global _devnet_checkout
+    if _devnet_checkout is None:
+        _devnet_checkout = GuardedDevnetCheckout(
+            ledger=InMemoryPaymentLedger(),
+            gateway=DevnetUsdcTransferService(settings),
+        )
+    return _devnet_checkout
 
 
 def inspect_payment_request(payload: str) -> dict[str, Any]:
@@ -167,6 +189,106 @@ def execute_mock_guarded_checkout(
                 "explorer_url": receipt.explorer_url,
             }
             if receipt is not None
+            else None
+        ),
+    }
+
+
+async def execute_authorized_checkout(
+    payload: str,
+    authorization_id: str,
+) -> dict[str, Any]:
+    """Execute using a server-stored user policy identified by an authorization ID.
+
+    The tool deliberately does not accept policy limits, merchant identity, wallet
+    paths, network endpoints, or signing material from the model. In Devnet mode it
+    can move real Devnet assets, so call it only after explicit user authorization.
+    """
+
+    authorization = _authorization_store.get(authorization_id)
+    if authorization is None:
+        return {"status": "authorization_not_found", "submitted": False}
+
+    settings = SolanaSettings()
+    intent = resolve_payment_intent(payload)
+    if intent.recipient != settings.demo_merchant_recipient:
+        return {
+            "status": "unverified_merchant",
+            "submitted": False,
+            "intent_id": intent.intent_id,
+        }
+
+    now = datetime.now(UTC)
+    if settings.payment_execution_mode == "mock":
+        result = _mock_checkout.run(
+            payload,
+            authorization.policy,
+            session_id=authorization.session_id,
+            verified_merchant_id=settings.demo_merchant_id,
+            now=now,
+        )
+        mock_receipt = result.receipt
+        return {
+            "status": result.status.value,
+            "mode": "mock",
+            "submitted": result.status.value in {"submitted", "confirmed"},
+            "real_funds_moved": False,
+            "duplicate": result.duplicate,
+            "intent_id": result.intent.intent_id,
+            "failure_code": result.failure_code,
+            "policy_rejection_codes": [
+                code.value for code in result.attempt.policy_rejection_codes
+            ],
+            "receipt": (
+                {
+                    "mock": True,
+                    "signature": mock_receipt.signature,
+                    "network": mock_receipt.network,
+                    "recipient": mock_receipt.recipient,
+                    "mint": mock_receipt.mint,
+                    "amount_atomic": str(mock_receipt.amount_atomic),
+                    "decimals": mock_receipt.decimals,
+                    "reference": mock_receipt.reference,
+                    "explorer_url": None,
+                }
+                if mock_receipt is not None
+                else None
+            ),
+        }
+
+    checkout = _get_devnet_checkout(settings)
+    devnet_result = await checkout.run(
+        payload,
+        authorization.policy,
+        session_id=authorization.session_id,
+        verified_merchant_id=settings.demo_merchant_id,
+        now=now,
+    )
+    devnet_receipt = devnet_result.receipt
+    return {
+        "status": devnet_result.status.value,
+        "mode": "devnet",
+        "submitted": devnet_result.status.value in {"submitted", "confirmed"},
+        "real_funds_moved": devnet_result.status.value == "confirmed",
+        "duplicate": devnet_result.duplicate,
+        "intent_id": devnet_result.intent.intent_id,
+        "failure_code": devnet_result.failure_code,
+        "policy_rejection_codes": [
+            code.value for code in devnet_result.attempt.policy_rejection_codes
+        ],
+        "receipt": (
+            {
+                "mock": False,
+                "signature": devnet_receipt.signature,
+                "network": devnet_receipt.network,
+                "recipient": devnet_receipt.recipient,
+                "mint": devnet_receipt.mint,
+                "amount_atomic": str(devnet_receipt.amount_atomic),
+                "decimals": devnet_receipt.decimals,
+                "reference": devnet_receipt.reference,
+                "explorer_url": devnet_receipt.explorer_url,
+            }
+            if devnet_receipt is not None
             else None
         ),
     }

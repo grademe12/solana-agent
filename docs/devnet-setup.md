@@ -68,3 +68,31 @@ RPC simulation까지만 수행한다. `sendTransaction`은 호출하지 않는�
 
 출력의 마지막 줄은 항상 `Submitted: false`다. SOL 또는 USDC가 부족하면
 `AccountNotFound`나 잔액 부족 오류가 정상적으로 표시되며 온체인 거래는 생기지 않는다.
+
+## ADK 실행 모드와 사용자 authorization
+
+기본값은 다음과 같이 `mock`이다. 이 상태에서 ADK 실행 도구는 실제 RPC 제출이나
+키 파일 서명을 수행하지 않는다.
+
+```dotenv
+PAYMENT_EXECUTION_MODE=mock
+```
+
+사용자는 먼저 `POST /api/authorizations`에 세션 ID와 `SpendingPolicy`를 등록해야 한다.
+API가 반환한 `authorization_id`만 Gemini의 `execute_authorized_checkout` 도구에 전달한다.
+이 도구는 모델 입력에서 정책 한도, 판매자 ID, 지갑 경로, RPC 주소를 받지 않는다.
+
+실제 Devnet 데모 직전에만 아래 값을 `.env`에 설정하고 프로세스를 재시작한다.
+
+```dotenv
+PAYMENT_EXECUTION_MODE=devnet
+DEMO_MERCHANT_ID=demo-merchant
+DEMO_MERCHANT_RECIPIENT=<검증된 Solana Devnet 수취 주소>
+```
+
+실행기는 QR의 수취 주소가 `DEMO_MERCHANT_RECIPIENT`와 정확히 일치할 때만 해당
+판매자를 검증된 대상으로 취급한다. 정책 거부 또는 simulation 실패는 제출 전에
+종료되며, 제출 후 확인이 불완전한 거래는 자동 재전송하지 않는다.
+
+로컬 authorization 저장소는 프로세스 재시작 시 초기화된다. Cloud Run 배포 전에는
+이 API에 사용자 인증을 추가하고 저장소를 Firestore 트랜잭션으로 교체해야 한다.

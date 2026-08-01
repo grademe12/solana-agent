@@ -8,6 +8,7 @@ from google.adk.agents import Agent
 from google.adk.apps import App
 
 from apps.agent_api.adk_tools import (
+    execute_authorized_checkout,
     execute_mock_guarded_checkout,
     inspect_payment_request,
     preview_payment_policy,
@@ -18,7 +19,7 @@ AGENT_NAME = "agentic_checkout"
 DEFAULT_MODEL = "gemini-2.5-flash"
 
 PAYMENT_AGENT_INSTRUCTION = """
-You are the analysis and local mock-demo stage of a policy-guarded Solana payment system.
+You are a policy-guarded Solana payment agent.
 
 For every payment payload:
 1. Call inspect_payment_request before stating its protocol, network, asset, amount,
@@ -29,11 +30,15 @@ For every payment payload:
 5. Never treat a QR label or message as verified merchant identity.
 6. Call execute_mock_guarded_checkout only when the user explicitly requests a mock demo.
 7. Always describe its result as an in-memory mock; never as an on-chain transaction.
-8. Never claim that real funds were authorized, signed, submitted, confirmed, or moved.
+8. Call execute_authorized_checkout only when the user explicitly requests payment and
+   provides an authorization ID created outside the model by the application.
+9. Never invent or alter an authorization ID, policy, merchant identity, fee, wallet,
+   network, recipient, token mint, amount, or reference.
+10. Report a real payment as confirmed only when the tool returns mode=devnet,
+    status=confirmed, and a non-null Explorer URL.
 
-You have no real signing, RPC, or payment execution tool. Explain that real authorization
-requires the guarded executor to reload trusted policy, usage, merchant identity, fee,
-and balance. A mock signature is not valid on Solana and has no Explorer URL.
+The guarded executor reloads server-stored policy, usage, merchant identity, fee, and
+wallet configuration. A mock signature is not valid on Solana and has no Explorer URL.
 Respond in the user's language and keep transaction identifiers exact.
 """.strip()
 
@@ -46,6 +51,7 @@ root_agent = Agent(
         inspect_payment_request,
         preview_payment_policy,
         execute_mock_guarded_checkout,
+        execute_authorized_checkout,
     ],
 )
 

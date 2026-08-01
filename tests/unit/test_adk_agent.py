@@ -1,10 +1,13 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from google.adk.agents import Agent
 from google.adk.apps import App
 
 from apps.agent_api.adk_tools import (
+    authorization_store,
+    execute_authorized_checkout,
     execute_mock_guarded_checkout,
     inspect_payment_request,
     preview_payment_policy,
@@ -17,6 +20,7 @@ from apps.agent_api.agent import (
     root_agent,
 )
 from apps.agent_api.tools.resolve_intent import SOLANA_DEVNET_USDC_MINT
+from packages.schemas import SpendingPolicy
 
 RECIPIENT = "FvJ8k8HhXp4a3zQyFMZd4FvEqcYdYE7gSZWxrEBRfBsB"
 REFERENCE = "11111111111111111111111111111111"
@@ -47,7 +51,7 @@ def make_policy_json() -> str:
     )
 
 
-def test_adk_app_exposes_read_only_payment_agent() -> None:
+def test_adk_app_exposes_guarded_payment_agent() -> None:
     assert isinstance(root_agent, Agent)
     assert isinstance(adk_app, App)
     assert root_agent.name == AGENT_NAME
@@ -59,18 +63,15 @@ def test_adk_app_exposes_read_only_payment_agent() -> None:
         "inspect_payment_request",
         "preview_payment_policy",
         "execute_mock_guarded_checkout",
+        "execute_authorized_checkout",
     }
-    assert not any(
-        dangerous in tool_name
-        for tool_name in tool_names
-        for dangerous in ("sign", "submit", "transfer")
-    )
 
 
-def test_agent_instruction_forbids_payment_completion_claims() -> None:
+def test_agent_instruction_restricts_payment_completion_claims() -> None:
     assert "Never infer a missing amount" in PAYMENT_AGENT_INSTRUCTION
-    assert "Never claim that real funds were authorized" in PAYMENT_AGENT_INSTRUCTION
-    assert "no real signing, RPC, or payment execution tool" in PAYMENT_AGENT_INSTRUCTION
+    assert "provides an authorization ID" in PAYMENT_AGENT_INSTRUCTION
+    assert "Never invent or alter an authorization ID" in PAYMENT_AGENT_INSTRUCTION
+    assert "status=confirmed" in PAYMENT_AGENT_INSTRUCTION
     assert "mock signature is not valid on Solana" in PAYMENT_AGENT_INSTRUCTION
 
 
@@ -119,3 +120,27 @@ def test_adk_mock_checkout_tool_never_claims_real_payment() -> None:
     assert result["receipt"]["mock"] is True
     assert result["receipt"]["explorer_url"] is None
     assert result["receipt"]["signature"].startswith("mock:")
+
+
+@pytest.mark.asyncio
+async def test_authorized_tool_uses_server_stored_policy_in_mock_mode() -> None:
+    policy = SpendingPolicy.model_validate_json(make_policy_json())
+    authorization = authorization_store().create(
+        session_id="authorized-tool-session",
+        policy=policy,
+        now=datetime.now(UTC),
+    )
+
+    result = await execute_authorized_checkout(PAYLOAD, authorization.authorization_id)
+
+    assert result["status"] == "confirmed"
+    assert result["mode"] == "mock"
+    assert result["real_funds_moved"] is False
+    assert result["receipt"]["mock"] is True
+
+
+@pytest.mark.asyncio
+async def test_authorized_tool_rejects_unknown_authorization() -> None:
+    result = await execute_authorized_checkout(PAYLOAD, "unknown")
+
+    assert result == {"status": "authorization_not_found", "submitted": False}
