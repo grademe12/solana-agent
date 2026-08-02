@@ -11,6 +11,7 @@ const SAMPLE_PAYLOAD =
 
 type Intent = {
   intent_id: string;
+  protocol: string;
   confidence: string;
   network: string;
   recipient: string | null;
@@ -76,6 +77,28 @@ function shorten(value: string | null | undefined, size = 8) {
   if (!value) return "—";
   if (value.length <= size * 2 + 3) return value;
   return `${value.slice(0, size)}…${value.slice(-size)}`;
+}
+
+function protocolLabel(protocol: string) {
+  if (protocol === "solana_pay") return "Solana Pay";
+  if (protocol === "base_pay") return "Base Pay";
+  if (protocol === "raw_address") return "Solana 주소";
+  return "알 수 없는 형식";
+}
+
+function networkLabel(network: string) {
+  if (network === "solana:devnet") return "Solana Devnet";
+  if (network === "solana:mainnet") return "Solana Mainnet";
+  if (network === "eip155:8453") return "Base Mainnet (8453)";
+  if (network === "eip155:84532") return "Base Sepolia (84532)";
+  return network;
+}
+
+function rejectionMessage(intent: Intent) {
+  if (intent.protocol === "base_pay" && intent.rejection_code === "unsupported_network") {
+    return "Base 네트워크 결제 요청으로 확인했습니다. 현재 P0는 Solana Devnet USDC만 실행합니다.";
+  }
+  return intent.rejection_reason;
 }
 
 export default function Home() {
@@ -241,16 +264,22 @@ export default function Home() {
           {intent && (
             <div className={`intent-card ${intent.confidence}`}>
               <div className="intent-title">
-                <span>{intent.confidence === "authoritative" ? "검증 가능한 요청" : "실행 불가"}</span>
-                <b>{intent.confidence}</b>
+                <span>
+                  {intent.confidence === "authoritative"
+                    ? "검증 가능한 요청"
+                    : `${protocolLabel(intent.protocol)} · 실행 불가`}
+                </span>
+                <b>{intent.rejection_code ?? intent.confidence}</b>
               </div>
               <dl>
+                <div><dt>프로토콜</dt><dd>{protocolLabel(intent.protocol)}</dd></div>
+                <div><dt>네트워크</dt><dd title={intent.network}>{networkLabel(intent.network)}</dd></div>
                 <div><dt>금액</dt><dd>{intent.amount_display ?? "—"} {intent.asset?.symbol ?? ""}</dd></div>
-                <div><dt>네트워크</dt><dd>{intent.network}</dd></div>
+                <div><dt>자산</dt><dd>{intent.asset?.symbol ?? "—"}</dd></div>
                 <div><dt>수취인</dt><dd title={intent.recipient ?? ""}>{shorten(intent.recipient)}</dd></div>
                 <div><dt>Reference</dt><dd title={intent.reference ?? ""}>{shorten(intent.reference)}</dd></div>
               </dl>
-              {intent.rejection_reason && <p className="rejection">{intent.rejection_reason}</p>}
+              {rejectionMessage(intent) && <p className="rejection">{rejectionMessage(intent)}</p>}
             </div>
           )}
         </div>

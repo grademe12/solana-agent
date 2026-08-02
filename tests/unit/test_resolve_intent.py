@@ -7,6 +7,12 @@ from packages.schemas import IntentConfidence, PaymentProtocol
 
 RECIPIENT = "FvJ8k8HhXp4a3zQyFMZd4FvEqcYdYE7gSZWxrEBRfBsB"
 REFERENCE = "11111111111111111111111111111111"
+BASE_PAY_PAYLOAD = (
+    "https://base.app/base-pay?"
+    "paymentSessionId=paymentSession_d094d3bb-9490-42c4-87e0-6537866fba4b"
+    "&baseURL=https%3A%2F%2Fapi.cdp.coinbase.com%2Fplatform"
+    "&amount=10.00&asset=usdc"
+)
 
 
 def test_resolves_authoritative_devnet_usdc_transfer() -> None:
@@ -38,6 +44,21 @@ def test_rejects_base_eip681_request_before_execution() -> None:
     assert intent.protocol is PaymentProtocol.BASE_PAY
     assert intent.network == "eip155:8453"
     assert intent.rejection_code == "unsupported_network"
+    assert not intent.is_executable
+
+
+def test_classifies_base_app_payment_details_before_safe_rejection() -> None:
+    intent = resolve_payment_intent(BASE_PAY_PAYLOAD)
+
+    assert intent.confidence is IntentConfidence.UNSUPPORTED
+    assert intent.protocol is PaymentProtocol.BASE_PAY
+    assert intent.network == "eip155:8453"
+    assert intent.rejection_code == "unsupported_network"
+    assert intent.amount is not None
+    assert intent.amount.atomic == 10_000_000
+    assert intent.asset is not None
+    assert intent.asset.symbol == "USDC"
+    assert intent.asset.mint is None
     assert not intent.is_executable
 
 
@@ -88,4 +109,3 @@ def test_unknown_url_is_unsupported_without_network_access() -> None:
 
     assert intent.confidence is IntentConfidence.UNSUPPORTED
     assert intent.rejection_code == "unsupported_protocol"
-

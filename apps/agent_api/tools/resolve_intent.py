@@ -22,6 +22,9 @@ SOLANA_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 DECIMAL_AMOUNT_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$")
 BASE_CHAIN_IDS = frozenset({"8453", "84532"})
 BASE_PAYMENT_HOSTS = frozenset({"pay.coinbase.com", "commerce.coinbase.com"})
+BASE_APP_PAYMENT_HOST = "base.app"
+BASE_APP_PAYMENT_PATH = "/base-pay"
+BASE_USDC_DECIMALS = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,8 @@ def _rejected(
     code: str,
     reason: str,
     recipient: str | None = None,
+    amount: TokenAmount | None = None,
+    asset: PaymentAsset | None = None,
 ) -> PaymentIntent:
     payload_hash = _hash_payload(payload)
     return PaymentIntent(
@@ -79,6 +84,8 @@ def _rejected(
         protocol=protocol,
         network=network,
         recipient=recipient,
+        amount=amount,
+        asset=asset,
         source_payload_hash=payload_hash,
         confidence=confidence,
         rejection_code=code,
@@ -260,14 +267,50 @@ def _resolve_non_solana(payload: str) -> PaymentIntent:
     parsed = urlsplit(payload)
     lowered = payload.lower()
     host = (parsed.hostname or "").lower()
+    is_base_app_payment = (
+        parsed.scheme.lower() == "https"
+        and host == BASE_APP_PAYMENT_HOST
+        and parsed.path.rstrip("/") == BASE_APP_PAYMENT_PATH
+    )
     is_base = (
         parsed.scheme.lower() == "base"
         or host in BASE_PAYMENT_HOSTS
+        or is_base_app_payment
         or any(f"@{chain_id}" in parsed.path for chain_id in BASE_CHAIN_IDS)
         or any(f"chainid={chain_id}" in lowered for chain_id in BASE_CHAIN_IDS)
     )
     if is_base:
         network = "eip155:84532" if ("84532" in lowered) else "eip155:8453"
+        amount: TokenAmount | None = None
+        asset: PaymentAsset | None = None
+        if is_base_app_payment:
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            try:
+                amount_text = _single_query_value(query, "amount")
+                asset_text = _single_query_value(query, "asset")
+            except ValueError:
+                amount_text = None
+                asset_text = None
+
+            if (
+                amount_text is not None
+                and asset_text is not None
+                and asset_text.casefold() == "usdc"
+                and DECIMAL_AMOUNT_PATTERN.fullmatch(amount_text) is not None
+            ):
+                try:
+                    parsed_amount = TokenAmount.from_decimal(
+                        amount_text, decimals=BASE_USDC_DECIMALS
+                    )
+                except (TypeError, ValueError):
+                    parsed_amount = None
+                if parsed_amount is not None and parsed_amount.atomic > 0:
+                    amount = parsed_amount
+                    asset = PaymentAsset(
+                        symbol="USDC",
+                        mint=None,
+                        decimals=BASE_USDC_DECIMALS,
+                    )
         return _rejected(
             payload,
             protocol=PaymentProtocol.BASE_PAY,
@@ -275,6 +318,8 @@ def _resolve_non_solana(payload: str) -> PaymentIntent:
             confidence=IntentConfidence.UNSUPPORTED,
             code="unsupported_network",
             reason="Base payment requests cannot be executed by the Solana-only P0",
+            amount=amount,
+            asset=asset,
         )
     return _rejected(
         payload,
